@@ -77,6 +77,80 @@ def _extract_json_from_response(response_str: str) -> str | None:
     return None
 
 
+def _try_repair_json(json_str: str) -> dict | None:
+    """
+    尝试修复常见的 AI 输出 JSON 错误。
+    常见问题：叙事文本中的未转义引号、控制字符、尾部逗号等。
+    """
+    import re as _re
+    if not json_str:
+        return None
+    
+    try:
+        # 第一次尝试：直接解析
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
+    
+    repaired = json_str
+    
+    try:
+        # 修复 1：移除控制字符（保留 \n \r \t）
+        repaired = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', repaired)
+        
+        # 修复 2：尝试找到 narrative 和 state_update/roll_request 字段，分别提取
+        # 这解决了叙事文本中未转义引号的核心问题
+        narrative_match = _re.search(
+            r'"narrative"\s*:\s*"(.*?)"\s*,\s*"(state_update|roll_request|trigger_program)',
+            repaired, _re.DOTALL
+        )
+        if narrative_match:
+            raw_narrative = narrative_match.group(1)
+            # 转义叙事文本中的问题字符
+            safe_narrative = raw_narrative.replace('\\', '\\\\') \
+                .replace('\n', '\\n') \
+                .replace('\r', '\\r') \
+                .replace('\t', '\\t')
+            # 处理叙事中的未转义双引号（排除已转义的）
+            safe_narrative = _re.sub(r'(?<!\\)"', '\\"', safe_narrative)
+            repaired = repaired[:narrative_match.start(1)] + safe_narrative + repaired[narrative_match.end(1):]
+        
+        # 修复 3：移除尾部逗号 (trailing commas)
+        repaired = _re.sub(r',\s*}', '}', repaired)
+        repaired = _re.sub(r',\s*]', ']', repaired)
+        
+        result = json.loads(repaired)
+        logger.info("✅ JSON 修复成功！")
+        return result
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"JSON 修复失败: {e}")
+    
+    try:
+        # 最后尝试：用正则分别提取 narrative 和 state_update
+        narrative = _re.search(r'"narrative"\s*:\s*"(.*?)"\s*[,}]', repaired, _re.DOTALL)
+        state_update = _re.search(r'"state_update"\s*:\s*(\{.*?\})\s*}', repaired, _re.DOTALL)
+        roll_request = _re.search(r'"roll_request"\s*:\s*(\{.*?\})\s*}', repaired, _re.DOTALL)
+        
+        if narrative:
+            result = {"narrative": narrative.group(1).replace('\n', '\\n')}
+            if state_update:
+                try:
+                    result["state_update"] = json.loads(state_update.group(1))
+                except:
+                    result["state_update"] = {}
+            elif roll_request:
+                try:
+                    result["roll_request"] = json.loads(roll_request.group(1))
+                except:
+                    pass
+            logger.info("✅ 通过正则提取成功重建 JSON！")
+            return result
+    except Exception as e:
+        logger.warning(f"正则提取也失败: {e}")
+    
+    return None
+
+
 # --- Core Function ---
 async def get_ai_response(
     prompt: str,
@@ -163,9 +237,11 @@ async def _get_ai_response_impl(
                     _model = random.choice(model_options)
                     logger.debug(f"从列表中选择模型: {_model}")
         try:
-            response = await client.chat.completions.create(
-                model=_model, messages=messages
-            )
+            create_kwargs = dict(model=_model, messages=messages)
+            # 强制 JSON 输出格式（大多数 OpenAI 兼容 API 支持）
+            if force_json:
+                create_kwargs["response_format"] = {"type": "json_object"}
+            response = await client.chat.completions.create(**create_kwargs)
             ai_message = response.choices[0].message.content
             if not ai_message:
                 raise ValueError("AI 响应为空")
@@ -175,13 +251,24 @@ async def _get_ai_response_impl(
 
             if force_json:
                 try:
-                    json_part = json.loads(_extract_json_from_response(ret))
+                    extracted = _extract_json_from_response(ret)
+                    if not extracted:
+                        raise ValueError("未找到有效的JSON部分")
+                    json_part = json.loads(extracted)
                     if json_part:
                         return ret
                     else:
                         raise ValueError("未找到有效的JSON部分")
-                except Exception as e:
-                    raise ValueError(f"解析AI响应时出错: {e}")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON 直接解析失败，尝试修复... 错误: {e}")
+                    logger.debug(f"原始响应前200字符: {ret[:200]}")
+                    # 尝试修复
+                    repaired = _try_repair_json(extracted)
+                    if repaired:
+                        # 修复成功，返回修复后的 JSON 字符串
+                        return json.dumps(repaired, ensure_ascii=False)
+                    else:
+                        raise ValueError(f"解析AI响应时出错且修复失败: {e}")
             else:
                 return ret
 
