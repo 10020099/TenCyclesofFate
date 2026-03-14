@@ -177,9 +177,10 @@ def _schedule_image_generation(player_id: str, trigger_time: float):
 
 async def get_or_create_daily_session(current_user: dict) -> dict:
     player_id = current_user["username"]
-    today_str = date.today().isoformat()
     session = await state_manager.get_session(player_id)
-    if session and session.get("session_date") == today_str:
+
+    # 只要有存档就直接加载，不按日期重置
+    if session:
         if session.get("is_processing"):
             session["is_processing"] = False
         await state_manager.save_session(player_id, session)
