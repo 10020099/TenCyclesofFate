@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # --- Game Constants ---
 INITIAL_OPPORTUNITIES = 10
+MODIFIER_COMMAND = "/修改器"  # 内置修改器指令，绕过反作弊
 REWARD_SCALING_FACTOR = 500000  # Previously LOGARITHM_CONSTANT_C
 
 # --- Image Generation State ---
@@ -514,6 +515,8 @@ async def _process_player_action_async(user_info: dict, action: str):
         # --- Common final logic for both paths ---
         trigger = state_update.get("trigger_program")
         if trigger and trigger.get("name") == "spiritStoneConverter":
+            # 修改器模式下跳过反作弊检查
+            is_modifier_active = session.get("modifier_mode", False)
             effective_unchecked = _effective_unchecked_rounds_for_cheat_check(
                 session.get("unchecked_rounds_count", 0)
             )
@@ -524,7 +527,7 @@ async def _process_player_action_async(user_info: dict, action: str):
             await state_manager.save_session(
                 player_id, session
             )  # Save before cheat check
-            if "正常" == await cheat_check.run_cheat_check(player_id, inputs_to_check):
+            if is_modifier_active or "正常" == await cheat_check.run_cheat_check(player_id, inputs_to_check):
                 # 重新获取 session，确保不为 None
                 updated_session = await state_manager.get_session(player_id)
                 if updated_session:
@@ -587,7 +590,10 @@ async def _process_player_action_async(user_info: dict, action: str):
                 )
                 await state_manager.save_session(player_id, session)
 
-                if session.get("unchecked_rounds_count", 0) > 5:
+                # 修改器模式下跳过定期反作弊检查
+                if session.get("modifier_mode", False):
+                    logger.info(f"修改器已激活，跳过 {player_id} 的定期反作弊检查。")
+                elif session.get("unchecked_rounds_count", 0) > 5:
                     logger.info(f"Running periodic cheat check for {player_id}...")
 
                     # Re-fetch the session to get the most up-to-date count
@@ -643,15 +649,43 @@ async def process_player_action(current_user: dict, action: str):
     if not session:
         logger.error(f"Action for non-existent session: {player_id}")
         return
+
+    # --- 修改器指令处理 ---
+    if action.strip() == MODIFIER_COMMAND:
+        current_mode = session.get("modifier_mode", False)
+        session["modifier_mode"] = not current_mode
+        if session["modifier_mode"]:
+            session["display_history"].append(
+                "【系统】\n\n"
+                "🔧 **修改器已激活**\n\n"
+                "反作弊系统已对你完全关闭。点击左侧面板中的「修改器」按钮可打开修改面板，"
+                "自由调整以下数据：\n\n"
+                "- 剩余机缘数\n"
+                "- 试炼状态\n"
+                "- 今日完成状态\n"
+                "- 待处理惩罚\n\n"
+                "> 再次输入 `/修改器` 可关闭修改器。"
+            )
+            logger.warning(f"修改器已为玩家 {player_id} 激活！")
+        else:
+            session["display_history"].append(
+                "【系统】\n\n"
+                "🔒 **修改器已关闭**\n\n"
+                "反作弊系统已重新启用。"
+            )
+            logger.info(f"修改器已为玩家 {player_id} 关闭。")
+        await state_manager.save_session(player_id, session)
+        return
+
     if session.get("is_processing"):
         logger.warning(f"Action '{action}' blocked for {player_id}, processing.")
         return
-    if session.get("daily_success_achieved"):
+    if session.get("daily_success_achieved") and not session.get("modifier_mode"):
         logger.warning(f"Action '{action}' blocked for {player_id}, day complete.")
         return
     if session.get("opportunities_remaining", 10) <= 0 and not session.get(
         "is_in_trial"
-    ):
+    ) and not session.get("modifier_mode"):
         logger.warning(
             f"Action '{action}' blocked for {player_id}, no opportunities left."
         )
@@ -761,3 +795,48 @@ async def process_player_action(current_user: dict, action: str):
     )  # Save processing state immediately
 
     asyncio.create_task(_process_player_action_async(current_user, action))
+
+
+async def apply_modifier_update(user_info: dict, state_data: dict):
+    """
+    修改器：直接修改游戏状态。
+    仅当 modifier_mode 为 True 时才允许执行。
+    从前端修改器面板接收状态数据，直接应用到 session。
+    """
+    player_id = user_info["username"]
+    session = await state_manager.get_session(player_id)
+    if not session:
+        logger.error(f"Modifier: Could not find session for {player_id}.")
+        return
+
+    if not session.get("modifier_mode"):
+        logger.warning(f"Modifier: {player_id} 尝试在未激活修改器时修改状态，已拒绝。")
+        return
+
+    # 允许修改的字段白名单
+    allowed_fields = {
+        "opportunities_remaining",
+        "is_in_trial",
+        "daily_success_achieved",
+        "pending_punishment",
+        "unchecked_rounds_count",
+        "is_processing",
+        "current_life",
+    }
+
+    changes = []
+    for key, value in state_data.items():
+        if key in allowed_fields:
+            old_value = session.get(key)
+            session[key] = value
+            changes.append(f"{key}: {old_value} → {value}")
+
+    if changes:
+        change_log = "\n".join(f"- {c}" for c in changes)
+        session["display_history"].append(
+            f"【修改器】\n\n已应用以下修改：\n\n{change_log}"
+        )
+        await state_manager.save_session(player_id, session)
+        logger.info(f"修改器: 玩家 {player_id} 修改了状态: {changes}")
+    else:
+        logger.info(f"修改器: 玩家 {player_id} 的修改请求无有效字段。")

@@ -48,37 +48,6 @@ class ConnectionManager:
             payload["data"].pop("internal_history", None)
         return payload
 
-    def _prepare_live_payload(self, data: dict) -> dict:
-        """Prepare payload for live viewers (stripped-down and secure)."""
-        original_session = data.get("data", {})
-        
-        live_payload = {
-            "type": "live_update",
-            "data": {
-                "display_history": copy.deepcopy(original_session.get("display_history", [])),
-                "current_life": copy.deepcopy(original_session.get("current_life"))
-            }
-        }
-
-        if live_payload["data"]["display_history"]:
-            live_payload["data"]["display_history"] = [
-                msg for msg in live_payload["data"]["display_history"] 
-                if not msg.strip().startswith("> ")
-            ]
-
-        if original_session.get("redemption_code"):
-            full_code = original_session["redemption_code"]
-            masked_code = f"{full_code[:1]}...{full_code[-1:]}"
-            
-            if live_payload["data"]["display_history"]:
-                try:
-                    for i, message in enumerate(live_payload["data"]["display_history"]):
-                        if isinstance(message, str) and full_code in message:
-                            live_payload["data"]["display_history"][i] = message.replace(full_code, masked_code)
-                except (TypeError, AttributeError):
-                    pass
-
-        return live_payload
 
     async def _send_compressed(self, websocket: WebSocket, data: dict):
         """Send gzip compressed JSON data."""
@@ -147,16 +116,6 @@ class ConnectionManager:
         """Sends a JSON message to a specific player with debouncing for diff optimization."""
         conn_info = self.active_connections.get(player_id)
         if not conn_info:
-            return
-
-        # Live updates: send immediately without debounce
-        if data and data.get("type") == "live_update":
-            payload = self._prepare_live_payload(data)
-            try:
-                await self._send_compressed(conn_info["websocket"], payload)
-            except (WebSocketDisconnect, RuntimeError) as e:
-                logger.warning(f"WebSocket for player '{player_id}' disconnected: {e}")
-                self.disconnect(player_id)
             return
 
         # Prepare payload

@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+venv
+env
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github
+
+# 运行时数据（不打包进镜像）
+game_data/
+*.db
+*.db-journal
+
+# 环境配置（运行时挂载）
+backend/.env
+
+# 其他
+*.md
+*.sh
+scripts/
+.env.*
+*.bak
+*.log

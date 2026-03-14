@@ -1,0 +1,97 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:  # 支持手动触发
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # 创建 tag 需要
+      packages: write     # 推送镜像到 GHCR 需要
+
+    steps:
+      # 1. 拉取代码（包含所有 tags）
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史，用于读取 tags
+
+      # 2. 计算版本号：从 v1.0 开始，每次 +0.1
+      - name: Calculate next version
+        id: version
+        run: |
+          # 获取最新的 v*.* 格式 tag
+          LATEST_TAG=$(git tag -l 'v*.*' --sort=-version:refname | head -n 1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            # 没有任何 tag，从 v1.0 开始
+            NEXT_VERSION="v1.0"
+          else
+            # 提取主版本号和次版本号
+            VERSION_NUM="${LATEST_TAG#v}"
+            MAJOR=$(echo "$VERSION_NUM" | cut -d'.' -f1)
+            MINOR=$(echo "$VERSION_NUM" | cut -d'.' -f2)
+
+            # 次版本号 +1
+            MINOR=$((MINOR + 1))
+
+            # 如果次版本号到了 10，进位到主版本号
+            # （可选：如果你希望 v1.9 之后是 v1.10 而不是 v2.0，删除下面这段）
+            # if [ "$MINOR" -ge 10 ]; then
+            #   MAJOR=$((MAJOR + 1))
+            #   MINOR=0
+            # fi
+
+            NEXT_VERSION="v${MAJOR}.${MINOR}"
+          fi
+
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Next version: $NEXT_VERSION"
+
+      # 3. 创建 Git Tag
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
+
+      # 4. 登录 GitHub Container Registry
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 5. 设置 Docker Buildx（支持多平台构建）
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 6. 提取镜像元数据（标签、标注）
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+
+      # 7. 构建并推送镜像
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

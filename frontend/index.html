@@ -14,14 +14,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
     <!-- Add fast-json-patch for incremental state updates -->
     <script src="https://cdn.jsdelivr.net/npm/fast-json-patch@3.1.1/dist/fast-json-patch.min.js"></script>
-
-    <script type="text/javascript">
-        (function (c, l, a, r, i, t, y) {
-            c[a] = c[a] || function () { (c[a].q = c[a].q || []).push(arguments) };
-            t = l.createElement(r); t.async = 1; t.src = "https://www.clarity.ms/tag/" + i;
-            y = l.getElementsByTagName(r)[0]; y.parentNode.insertBefore(t, y);
-        })(window, document, "clarity", "script", "t8hrcju0wy");
-    </script>
 </head>
 
 <body>
@@ -30,7 +22,10 @@
         <div id="login-view" class="view active">
             <h1>浮生十梦</h1>
             <p>此乃试炼之地，请先表明身份。</p>
-            <a href="/api/login/linuxdo" class="login-button">使用 Linux.do 登录</a>
+            <div id="login-form">
+                <input type="text" id="login-key-input" placeholder="输入你的专属密钥..." autocomplete="off">
+                <button class="login-button" id="login-button">踏入轮回</button>
+            </div>
             <p id="login-error" class="error-message"></p>
         </div>
 
@@ -49,6 +44,8 @@
                 <!-- Character status will be rendered here -->
                 <p>【人物业力】</p>
                 <div id="character-status"></div>
+                <!-- 修改器按钮（仅在修改器激活时显示） -->
+                <button id="modifier-toggle-button" class="modifier-btn hidden">🔧 修改器</button>
             </aside>
 
             <main id="main-content">
@@ -82,6 +79,52 @@
                 <div id="roll-result-display" class="hidden">
                     <span id="roll-outcome"></span>
                     <span id="roll-value"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 修改器面板 -->
+        <div id="modifier-panel" class="hidden">
+            <div class="modifier-panel-header">
+                <h3>🔧 修改器面板</h3>
+                <button id="modifier-close" class="modifier-close-btn">×</button>
+            </div>
+            <div class="modifier-panel-body">
+                <div class="modifier-field">
+                    <label for="mod-opportunities">剩余机缘</label>
+                    <input type="number" id="mod-opportunities" min="0" max="999">
+                </div>
+                <div class="modifier-field">
+                    <label for="mod-in-trial">
+                        <input type="checkbox" id="mod-in-trial">
+                        当前在试炼中
+                    </label>
+                </div>
+                <div class="modifier-field">
+                    <label for="mod-daily-success">
+                        <input type="checkbox" id="mod-daily-success">
+                        今日已完成
+                    </label>
+                </div>
+                <div class="modifier-field">
+                    <label for="mod-punishment">
+                        <input type="checkbox" id="mod-punishment">
+                        清除待处理惩罚
+                    </label>
+                </div>
+                <div class="modifier-field">
+                    <label for="mod-processing">
+                        <input type="checkbox" id="mod-processing">
+                        清除处理锁定
+                    </label>
+                </div>
+                <div class="modifier-field">
+                    <label for="mod-current-life">角色数据 (current_life JSON)</label>
+                    <textarea id="mod-current-life" rows="8" placeholder="角色不在试炼中时为空..."></textarea>
+                    <small style="color: #999;">编辑角色的灵石、属性等数据。请保持 JSON 格式正确。</small>
+                </div>
+                <div class="modifier-actions">
+                    <button id="modifier-apply" class="modifier-apply-btn">✅ 应用修改</button>
                 </div>
             </div>
         </div>
