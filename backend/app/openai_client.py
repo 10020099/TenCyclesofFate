@@ -104,16 +104,12 @@ def _try_repair_json(json_str: str) -> dict | None:
             r'"narrative"\s*:\s*"(.*?)"\s*,\s*"(state_update|roll_request|trigger_program)',
             repaired, _re.DOTALL
         )
-        if narrative_match:
-            raw_narrative = narrative_match.group(1)
-            # 转义叙事文本中的问题字符
-            safe_narrative = raw_narrative.replace('\\', '\\\\') \
-                .replace('\n', '\\n') \
-                .replace('\r', '\\r') \
-                .replace('\t', '\\t')
-            # 处理叙事中的未转义双引号（排除已转义的）
-            safe_narrative = _re.sub(r'(?<!\\)"', '\\"', safe_narrative)
-            repaired = repaired[:narrative_match.start(1)] + safe_narrative + repaired[narrative_match.end(1):]
+        # 修复 2：将 JSON 字符串值中的真实换行符替换为转义序列
+        def _fix_newlines_in_strings(m):
+            val = m.group(0)
+            val = val.replace('\r\n', '\\n').replace('\r', '\\n').replace('\n', '\\n')
+            return val
+        repaired = _re.sub(r'"(?:[^"\\]|\\.)*"', _fix_newlines_in_strings, repaired, flags=_re.DOTALL)
         
         # 修复 3：移除尾部逗号 (trailing commas)
         repaired = _re.sub(r',\s*}', '}', repaired)
@@ -126,13 +122,17 @@ def _try_repair_json(json_str: str) -> dict | None:
         logger.warning(f"JSON 修复失败: {e}")
     
     try:
-        # 最后尝试：用正则分别提取 narrative 和 state_update
-        narrative = _re.search(r'"narrative"\s*:\s*"(.*?)"\s*[,}]', repaired, _re.DOTALL)
-        state_update = _re.search(r'"state_update"\s*:\s*(\{.*?\})\s*}', repaired, _re.DOTALL)
-        roll_request = _re.search(r'"roll_request"\s*:\s*(\{.*?\})\s*}', repaired, _re.DOTALL)
+        # 最后尝试：用正则分别提取 narrative 和 state_update 重建
+        narrative_pat = _re.search(
+            r'"narrative"\s*:\s*"(.*?)"\s*,\s*"(state_update|roll_request|trigger_program)',
+            repaired, _re.DOTALL
+        )
+        state_update = _re.search(r'"state_update"\s*:\s*(\{.*\})\s*\}$', repaired, _re.DOTALL)
+        roll_request = _re.search(r'"roll_request"\s*:\s*(\{.*\})\s*\}$', repaired, _re.DOTALL)
         
-        if narrative:
-            result = {"narrative": narrative.group(1).replace('\n', '\\n')}
+        if narrative_pat:
+            raw_narrative = narrative_pat.group(1)
+            result = {"narrative": raw_narrative}
             if state_update:
                 try:
                     result["state_update"] = json.loads(state_update.group(1))
@@ -143,10 +143,10 @@ def _try_repair_json(json_str: str) -> dict | None:
                     result["roll_request"] = json.loads(roll_request.group(1))
                 except:
                     pass
-            logger.info("✅ 通过正则提取成功重建 JSON！")
+            logger.info("\u2705 \u901a\u8fc7\u6b63\u5219\u63d0\u53d6\u6210\u529f\u91cd\u5efa JSON\uff01")
             return result
     except Exception as e:
-        logger.warning(f"正则提取也失败: {e}")
+        logger.warning(f"\u6b63\u5219\u63d0\u53d6\u4e5f\u5931\u8d25: {e}")
     
     return None
 
