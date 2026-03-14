@@ -257,7 +257,7 @@ async def _handle_roll_request(
         roll_request.get("target", 50),
         roll_request.get("sides", 100),
     )
-    roll_result = random.randint(1, sides)
+    roll_result = 1 if session.get("modifier_mode") else random.randint(1, sides)
     if roll_result <= (sides * 0.05):
         outcome = "大成功"
     elif roll_result <= target:

@@ -1,16 +1,19 @@
 # 《浮生十梦》
 
-**《浮生十梦》** 是一款基于 Web 的沉浸式文字冒险游戏。玩家在游戏中扮演一个与命运博弈的角色，每天有十次机会进入不同的“梦境”（即生命轮回），体验由 AI 动态生成的、独一无二的人生故事。游戏的核心在于“知足”与“贪欲”之间的抉择：是见好就收，还是追求更高的回报但可能失去一切？
+**《浮生十梦》** 是一款基于 Web 的沉浸式文字冒险游戏。玩家在游戏中扮演一个与命运博弈的角色，每天有十次机会进入不同的"梦境"（即生命轮回），体验由 AI 动态生成的、独一无二的人生故事。游戏的核心在于"知足"与"贪欲"之间的抉择：是见好就收，还是追求更高的回报但可能失去一切？
+
+> 本项目基于 [CassiopeiaCode/TenCyclesofFate](https://github.com/CassiopeiaCode/TenCyclesofFate) 进行本地化重构，移除了外部 OAuth 认证、直播观战、兑换码等在线功能，专注于纯粹的本地游玩体验。
 
 ## ✨ 功能特性
 
-- **动态 AI 生成内容**:每一次游戏体验都由大型语言模型（如 GPT）实时生成，确保了故事的独特性和不可预测性。
+- **动态 AI 生成内容**: 每一次游戏体验都由大型语言模型（如 GPT）实时生成，确保了故事的独特性和不可预测性。
 - **实时交互**: 通过 WebSocket 实现前端与后端的实时通信，提供流畅的游戏体验。
-- **OAuth2 认证**: 集成 Linux.do OAuth2 服务，实现安全便捷的用户登录。
-- **精美的前端界面**: 采用具有“江南园林”风格的 UI 设计，提供沉浸式的视觉体验。
-- **互动式判定系统**: 游戏中的关键行动可能触发“天命判定”。AI 会根据情境请求一次 D100 投骰，其“成功”、“失败”、“大成功”或“大失败”的结果将实时影响叙事走向，增加了游戏的随机性和戏剧性。
-- **智能反作弊机制**: 内置一套基于 AI 的反作弊系统。它会分析玩家的输入行为，以识别并惩罚那些试图使用“奇巧咒语”（如 Prompt 注入）来破坏游戏平衡或牟取不当利益的玩家，确保了游戏的公平性。
-- **数据持久化**: 游戏状态会定期保存，并在应用重启时加载，保证玩家进度不丢失。
+- **简易密钥登录**: 玩家自定义密钥即可登录，不同密钥区分不同用户，数据独立持久化。
+- **精美的前端界面**: 采用具有"江南园林"风格的 UI 设计，提供沉浸式的视觉体验。
+- **互动式判定系统**: 游戏中的关键行动可能触发"天命判定"。AI 会根据情境请求一次 D100 投骰，其"成功"、"失败"、"大成功"或"大失败"的结果将实时影响叙事走向。
+- **智能反作弊机制**: 内置一套基于 AI 的反作弊系统，识别并惩罚 Prompt 注入等作弊行为。
+- **数据持久化**: 游戏状态自动保存为 JSON 文件，应用重启后进度不丢失。
+- **容器化部署**: 提供 Dockerfile 和 GitHub Actions 自动构建流程，支持一键 Docker 部署。
 
 ## 🛠️ 技术栈
 
@@ -18,130 +21,109 @@
   - **框架**: FastAPI
   - **Web 服务器**: Uvicorn
   - **实时通信**: WebSockets
-  - **认证**: Python-JOSE (JWT), Authlib (OAuth)
-  - **数据库**: SQLite (用于存储兑换码)
-  - **AI 集成**: OpenAI API
-  - **依赖管理**: uv / pip
+  - **认证**: Cookie 密钥认证（无需第三方服务）
+  - **AI 集成**: OpenAI API（兼容任何 OpenAI 格式的 API）
+  - **依赖管理**: pip
 
 - **前端**:
   - **语言**: HTML, CSS, JavaScript (ESM)
   - **库**:
-    - `marked.js`: 用于在前端渲染 Markdown 格式的叙事文本。
-    - `pako.js`: 用于解压缩从 WebSocket 服务器接收的 Gzip 数据，提高传输效率。
+    - `marked.js`: 渲染 Markdown 格式的叙事文本
+    - `DOMPurify`: HTML 内容安全过滤
+    - `pako.js`: Gzip 解压缩 WebSocket 数据
+    - `fast-json-patch`: 增量状态更新
 
 ## 🚀 部署指南
 
-请遵循以下步骤在您的本地环境或服务器上部署《浮生十梦》。
+### 方式一：Docker 部署（推荐）
 
-### 1. 环境准备
-
-确保您的系统已安装以下软件：
-
-- **Python 3.8+**
-- **Git**
-- **uv** (推荐, 用于快速安装依赖):
-  ```bash
-  pip install uv
-  ```
-
-### 2. 获取项目代码
-
-使用 `git` 克隆本仓库到您的本地机器：
+#### 使用预构建镜像
 
 ```bash
-git clone https://github.com/CassiopeiaCode/TenCyclesofFate.git
+# 拉取最新镜像
+docker pull ghcr.io/<你的用户名>/tencyclesoffate:latest
+
+# 运行容器
+docker run -d \
+  --name tencyclesoffate \
+  -p 8000:8000 \
+  -v ./backend/.env:/app/backend/.env \
+  -v ./game_data:/app/game_data \
+  ghcr.io/<你的用户名>/tencyclesoffate:latest
+```
+
+#### 本地构建
+
+```bash
+# 构建镜像
+docker build -t tencyclesoffate .
+
+# 运行
+docker run -d \
+  --name tencyclesoffate \
+  -p 8000:8000 \
+  -v ./backend/.env:/app/backend/.env \
+  -v ./game_data:/app/game_data \
+  tencyclesoffate
+```
+
+> **挂载说明**：
+> - `-v ./backend/.env:/app/backend/.env` — 挂载配置文件（API 密钥等）
+> - `-v ./game_data:/app/game_data` — 挂载游戏存档目录，防止容器重启后数据丢失
+
+### 方式二：直接运行
+
+#### 1. 环境准备
+
+- **Python 3.11+**
+- **Git**
+
+#### 2. 获取代码
+
+```bash
+git clone <你的仓库地址>
 cd TenCyclesofFate
 ```
 
-### 3. 安装后端依赖
-
-项目使用 `uv`（或 `pip`）来管理 Python 依赖。在项目根目录下运行：
+#### 3. 安装依赖
 
 ```bash
-# 使用 uv (推荐)
-uv pip install -r backend/requirements.txt
-
-# 或者使用 pip
 pip install -r backend/requirements.txt
 ```
 
-### 4. 配置环境变量
+#### 4. 配置环境变量
 
-项目的所有配置都通过环境变量进行管理。
-
-1.  **创建 `.env` 文件**:
-    在 `backend/` 目录下，复制示例文件 `.env.example` 并重命名为 `.env`。
-
-    ```bash
-    cp backend/.env.example backend/.env
-    ```
-
-2.  **编辑 `.env` 文件**:
-    使用文本编辑器打开 `backend/.env` 文件，并填入以下必要信息：
-
-    ```dotenv
-    # OpenAI API Settings
-    # 必填。你的 OpenAI API 密钥。
-    OPENAI_API_KEY="your_openai_api_key_here"
-    # 如果你使用代理或第三方服务，请修改此 URL。
-    OPENAI_BASE_URL="https://api.openai.com/v1"
-    # 指定用于生成游戏内容的模型。
-    OPENAI_MODEL="gpt-4o"
-    # 指定用于作弊检查的模型。
-    OPENAI_MODEL_CHEAT_CHECK="gpt-3.5-turbo"
-
-    # JWT Settings for OAuth2
-    # 必填。一个长而随机的字符串，用于签名 JWT。
-    # 你可以使用 `openssl rand -hex 32` 生成。
-    SECRET_KEY="a_very_secret_key_that_should_be_changed"
-    ALGORITHM="HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES=600
-
-    # Linux.do OAuth Settings
-    # 必填。在 Linux.do 注册应用后获取的 Client ID。
-    LINUXDO_CLIENT_ID="your_linuxdo_client_id"
-    # 必填。在 Linux.do 注册应用后获取的 Client Secret。
-    LINUXDO_CLIENT_SECRET="your_linuxdo_client_secret"
-    LINUXDO_SCOPE="read"
-
-    # Database
-    # 数据库文件路径。默认指向项目根目录下的 veloera.db 文件。
-    DATABASE_URL="sqlite:///veloera.db"
-
-    # Server Settings
-    # 服务器监听的主机和端口。
-    HOST="0.0.0.0"
-    PORT=8000
-    # 是否开启热重载。在生产环境中建议设为 false。
-    UVICORN_RELOAD=true
-    ```
-
-    **重要**:
-    - **`SECRET_KEY`**: 必须更改为一个强随机字符串，否则会存在安全风险。
-    - **`LINUXDO_CLIENT_ID` / `SECRET`**: 你需要在 [Linux.do](https://linux.do/) 的用户设置中注册一个新的 OAuth2 应用来获取这些凭证。**回调 URL (Redirect URI)** 必须设置为 `http://<你的域名或IP>:<端口>/callback`。例如：`http://localhost:8000/callback`。
-
-### 5. 运行应用
-
-提供了一个 `run.sh` 脚本来方便地启动应用。
-
-首先，给脚本添加执行权限：
 ```bash
-chmod +x run.sh
+cp backend/.env.example backend/.env
 ```
 
-然后，运行脚本：
+编辑 `backend/.env`，填入必要信息：
+
+```dotenv
+# 必填：你的 OpenAI API 密钥
+OPENAI_API_KEY="your_openai_api_key_here"
+
+# 如果使用第三方中转 API，修改此 URL
+OPENAI_BASE_URL="https://api.openai.com/v1"
+
+# 游戏内容生成模型
+OPENAI_MODEL="gpt-4o"
+
+# 反作弊检查模型（可用便宜的模型）
+OPENAI_MODEL_CHEAT_CHECK="gpt-3.5-turbo"
+```
+
+#### 5. 启动服务
+
 ```bash
-./run.sh
+# Linux/macOS
+python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+
+# 或使用提供的脚本
+chmod +x run.sh && ./run.sh
 ```
 
-脚本会自动加载 `backend/.env` 文件中的环境变量，并使用 `uvicorn` 启动 FastAPI 服务器。
-
-服务器成功启动后，您应该会看到类似以下的输出：
-```
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-```
-
-现在，在您的浏览器中打开 `http://localhost:8000` 即可开始游戏。
+浏览器打开 `http://localhost:8000` 即可开始游戏。
 
 ## 📁 项目结构
 
@@ -152,27 +134,38 @@ INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 │   ├── requirements.txt    # Python 依赖
 │   └── app/
 │       ├── __init__.py
-│       ├── main.py         # FastAPI 应用主入口
+│       ├── main.py         # FastAPI 应用主入口，路由定义
 │       ├── config.py       # Pydantic 配置模型
-│       ├── auth.py         # 认证和 OAuth 逻辑
-│       ├── game_logic.py   # 核心游戏逻辑
+│       ├── auth.py         # 密钥认证
+│       ├── game_logic.py   # 核心游戏逻辑 + 修改器系统
 │       ├── websocket_manager.py # WebSocket 连接管理
 │       ├── state_manager.py  # 游戏状态的保存与加载
-│       ├── db.py           # 数据库连接
 │       ├── openai_client.py # OpenAI API 客户端
-│       ├── cheat_check.py  # 作弊检查逻辑
-│       ├── redemption.py   # 兑换码生成逻辑
-│       └── prompts/        # 存放 AI 系统提示的目录
+│       ├── cheat_check.py  # AI 反作弊检查
+│       └── prompts/        # AI 系统提示词
 │
 ├── frontend/
-│   ├── index.html          # 主 HTML 文件
-│   ├── style.css           # CSS 样式文件
-│   └── app.js              # 前端 JavaScript 逻辑
+│   ├── index.html          # 主页面（登录 + 游戏 + 修改器面板）
+│   ├── index.css           # CSS 样式（江南园林主题）
+│   └── index.js            # 前端逻辑
 │
-├── scripts/
-│   └── generate_token.py   # 用于生成测试 token 的脚本
-│
+├── Dockerfile              # Docker 镜像构建
+├── .dockerignore           # Docker 构建排除
+├── .github/workflows/      # CI/CD 自动构建
 ├── .gitignore
 ├── README.md               # 本文档
-└── run.sh                  # 应用启动脚本
+└── run.sh                  # 启动脚本
 ```
+
+## 🔄 CI/CD 自动构建
+
+推送到 `main`/`master` 分支时，GitHub Actions 会自动：
+
+1. 计算版本号（从 `v1.0` 开始，每次构建 +0.1）
+2. 创建 Git Tag
+3. 构建 Docker 镜像并推送到 GitHub Container Registry (ghcr.io)
+4. 同时打版本号 tag 和 `latest` tag
+
+## 📄 许可证
+
+本项目基于原项目进行修改，仅供个人学习和娱乐用途。
