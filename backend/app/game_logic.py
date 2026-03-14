@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 from fastapi import HTTPException, status
 
-from . import state_manager, openai_client, cheat_check, redemption
+from . import state_manager, openai_client, cheat_check
 from .websocket_manager import manager as websocket_manager
 from .config import settings
 
@@ -183,11 +183,6 @@ async def get_or_create_daily_session(current_user: dict) -> dict:
         if session.get("is_processing"):
             session["is_processing"] = False
         await state_manager.save_session(player_id, session)
-
-        if session.get("daily_success_achieved") and not session.get("redemption_code"):
-            session["daily_success_achieved"] = False
-            await state_manager.save_session(player_id, session)
-
         return session
 
     logger.info(f"Starting new daily session for {player_id}.")
@@ -243,7 +238,6 @@ async def get_or_create_daily_session(current_user: dict) -> dict:
 """
         ],
         "roll_event": None,
-        "redemption_code": None,
     }
     await state_manager.save_session(player_id, new_session)
     return new_session
@@ -298,34 +292,28 @@ async def _handle_roll_request(
 def end_game_and_get_code(
     user_id: int, player_id: str, spirit_stones: int
 ) -> tuple[dict, dict]:
+    """破碎虚空结算 —— 纯叙事版本（无兑换码）"""
     if spirit_stones <= 0:
-        return {"error": "未获得灵石，无法生成兑换码。"}, {}
+        return {"error": "未获得灵石，无法完成结算。"}, {}
 
     converted_value = REWARD_SCALING_FACTOR * min(
         30, max(1, 3 * (spirit_stones ** (1 / 6)))
     )
     converted_value = int(converted_value)
 
-    # Use the new database-integrated redemption code generation
-    code_name = f"天道十试-{date.today().isoformat()}-{player_id}"
-    redemption_code = redemption.generate_and_insert_redemption_code(
-        user_id=user_id, quota=converted_value, name=code_name
-    )
-
-    if not redemption_code:
-        final_message = "\n\n【天机有变】\n\n就在功德即将圆满之际，天道因果之线竟生出一丝紊乱。\n\n冥冥中似有外力干预，令这枚本应降世的天道馈赠化为虚无。此非汝之过，乃天机运转偶有差池。\n\n请持此凭证，寻访天道之外的司掌者，必能为汝寻回应得之物。"
-        return {
-            "error": "数据库错误，无法生成兑换码。",
-            "final_message": final_message,
-        }, {}
-
     logger.info(
-        f"Generated and stored DB code {redemption_code} for {player_id} with value {converted_value:.2f}."
+        f"Player {player_id} completed with {spirit_stones} spirit stones (value: {converted_value})."
     )
-    final_message = f"\n\n【天道回响 · 功德圆满】\n\n九天霞光倾洒，万籁俱寂。\n\n汝于浮生十梦中历经沉浮，终悟知足之道，功德圆满。天道特赐馈赠一枚，以彰汝之慧根：\n\n> {redemption_code}\n\n此乃汝应得之物，请妥善珍藏。\n\n明日此时，轮回之门将再度开启，届时可再入梦问道。今日且去，好生休憩。"
-    return {"final_message": final_message, "redemption_code": redemption_code}, {
+    final_message = (
+        f"\n\n【天道回响 · 功德圆满】\n\n"
+        f"九天霞光倾洒，万籁俱寂。\n\n"
+        f"汝于浮生十梦中历经沉浮，终悟知足之道，功德圆满。\n\n"
+        f"此番轮回共获得 **{spirit_stones} 灵石**，"
+        f"折算天道功德值为 **{converted_value:,}**。\n\n"
+        f"明日此时，轮回之门将再度开启，届时可再入梦问道。今日且去，好生休憩。"
+    )
+    return {"final_message": final_message}, {
         "daily_success_achieved": True,
-        "redemption_code": redemption_code,
     }
 
 
@@ -411,8 +399,18 @@ async def _process_player_action_async(user_info: dict, action: str):
         )
         session_copy = deepcopy(session)
         session_copy.pop("internal_history", 0)
+        # 过滤掉修改器相关的消息，不让 AI 看到
+        session_copy.pop("modifier_mode", None)
+        filtered_display = [
+            msg for msg in session_copy.get("display_history", [])
+            if not (isinstance(msg, str) and (
+                msg.startswith("【修改器】") or
+                msg.startswith("【系统】\n\n🔧") or
+                msg.startswith("【系统】\n\n🔒")
+            ))
+        ]
         session_copy["display_history"] = (
-            "\n".join(session_copy.get("display_history", []))
+            "\n".join(filtered_display)
         )[-300:]
         prompt_for_ai = (
             START_GAME_PROMPT

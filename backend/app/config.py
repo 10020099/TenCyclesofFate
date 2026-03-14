@@ -13,9 +13,6 @@ class Settings(BaseSettings):
     IMAGE_GEN_API_KEY: str | None = None
     IMAGE_GEN_IDLE_SECONDS: int = 10
 
-    # Database URL
-    DATABASE_URL: str = "sqlite:///./veloera.db"
-
     # Server Settings
     HOST: str = "127.0.0.1"
     PORT: int = 8000

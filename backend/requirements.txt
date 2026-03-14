@@ -4,12 +4,8 @@ pydantic-settings
 openai
 python-multipart
 websockets==12.0
-itsdangerous
 httpx
 python-dotenv
-sqlalchemy
-aiosqlite
-mysql-connector-python
 aiofiles
 ijson
 jsonpatch
