@@ -59,6 +59,7 @@ const api = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key }),
+            credentials: 'include',
         });
         if (!response.ok) {
             const err = await response.json();
@@ -69,6 +70,7 @@ const api = {
     async initGame() {
         const response = await fetch(`${API_BASE_URL}/game/init`, {
             method: 'POST',
+            credentials: 'include',
         });
         if (response.status === 401) {
             throw new Error('Unauthorized');
@@ -77,7 +79,7 @@ const api = {
         return response.json();
     },
     async logout() {
-        await fetch(`${API_BASE_URL}/logout`, { method: 'POST' });
+        await fetch(`${API_BASE_URL}/logout`, { method: 'POST', credentials: 'include' });
         window.location.href = '/';
     }
 };

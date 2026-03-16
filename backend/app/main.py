@@ -64,7 +64,10 @@ async def login(req: LoginRequest):
         "player_key",
         value=key,
         max_age=60 * 60 * 24 * 365,  # 1年
-        samesite="lax",
+        httponly=False,  # 前端需要读取
+        samesite="none",  # 确保 WebSocket 也携带 Cookie
+        secure=True,  # HTTPS 环境必须
+        path="/",
     )
     return response
 
