@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     IMAGE_GEN_API_KEY: str | None = None
     IMAGE_GEN_IDLE_SECONDS: int = 10
 
+    # Context Management
+    MAX_CONTEXT_TOKENS: int = 200000  # 模型最大上下文窗口 (Claude 4.5 Sonnet = 200K)
+
     # Server Settings
     HOST: str = "127.0.0.1"
     PORT: int = 8000

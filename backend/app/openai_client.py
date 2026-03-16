@@ -209,14 +209,14 @@ async def _get_ai_response_impl(
     total_tokens = sum(len(m["content"]) for m in messages)
     logger.debug(f"发送到OpenAI的消息总令牌数: {total_tokens}")
 
-    # 如果 token 过多，在 messages 副本上删除，不影响原始 history
+    # 硬性截断兜底：如果 token 仍然超限（压缩系统应已处理，这里是最后防线）
     _max_loop = 10000
     while total_tokens > 100000 and _max_loop > 0:
         if len(messages) <= 2:  # 至少保留 system 和当前 user 消息
             break
-        random_id = random.randint(1, len(messages) - 2)  # 不删除第一条和最后一条
-        total_tokens -= len(messages[random_id]["content"])
-        messages.pop(random_id)
+        # 从最旧的非首条消息开始删除（保留第一条 system 和最后一条 user）
+        total_tokens -= len(messages[1]["content"])
+        messages.pop(1)
         _max_loop -= 1
 
     if _max_loop == 0:

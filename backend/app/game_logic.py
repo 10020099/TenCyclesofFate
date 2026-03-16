@@ -21,6 +21,192 @@ logger = logging.getLogger(__name__)
 INITIAL_OPPORTUNITIES = 10
 MODIFIER_COMMAND = "/修改器"  # 内置修改器指令，绕过反作弊
 REWARD_SCALING_FACTOR = 500000  # Previously LOGARITHM_CONSTANT_C
+COMPRESSION_THRESHOLD = 0.8  # 上下文使用率达到 80% 时触发压缩
+RECENT_HISTORY_RATIO = 0.4   # 保留最近 40% 的对话不压缩
+
+# --- Context Compression ---
+
+COMPRESSION_PROMPT = """你正在为修真文字游戏《浮生十梦》压缩对话历史。你的任务是生成一份高质量的**剧情档案**，确保天道试炼官（AI GM）在后续叙事中不会遗忘任何关键信息。
+
+## 游戏核心机制（压缩时必须理解）
+
+- **轮回制**：玩家拥有多次"机缘"，每次开启新轮回获得全新角色身份
+- **天命判定（D100）**：关键行动由掷骰决定，结果分为大成功(≤5)、成功(≤target)、失败(>target)、大失败(≥96)
+- **破碎虚空**：玩家主动选择离场并带走灵石，一旦成功则当日试炼终结
+- **道消身殒**：角色死亡则该轮回所有积累清零
+- **current_life**：每个轮回的角色数据，包含姓名、属性、灵石、物品、状态效果、位置等
+
+## 必须保留的信息（按优先级）
+
+### 第一优先级 · 绝不可丢
+1. **当前角色完整身份**：姓名、性别、出身、外貌要点、初始天赋
+2. **当前角色数值状态**：灵石数、生命值、关键属性值（根骨/悟性/气运等）
+3. **正在进行的剧情线**：当前面临的处境、未完成的任务、悬而未决的冲突
+4. **重要NPC关系**：遇到的关键NPC、与玩家的关系（敌/友/师/盟）、恩怨因果
+
+### 第二优先级 · 尽量保留
+5. **关键判定记录**：每次天命判定的类型、目标值、结果（大成功/成功/失败/大失败）及其对剧情的影响
+6. **玩家重要选择**：面对分岔路时的抉择及后果
+7. **物品与状态变化**：获得/失去的重要物品、施加/解除的状态效果
+8. **灵石收支记录**：每次灵石的来源和数量变动
+
+### 第三优先级 · 概要记录
+9. **已完成的轮回**：前几世的角色名、身份、结局（破碎虚空/道消身殒）、带出灵石数
+10. **世界设定细节**：已揭示的地理位置、势力、背景故事
+11. **天道惩罚记录**：是否触发过反作弊惩罚及结果
+
+## 格式要求
+
+用以下结构组织摘要：
+
+```
+【往世轮回录】（如果有多个已结束的轮回）
+- 第X世·角色名·身份·结局·灵石
+
+【今世·角色名】
+- 身份：...
+- 天赋：...
+- 当前状态：灵石X颗，生命值X/X，位置：...
+- 关键属性：根骨X 悟性X 气运X ...
+- 重要物品：...
+
+【关键事件时间线】
+1. [事件]（判定：D100 目标X 结果X → 大成功/成功/失败/大失败）
+2. [事件]
+...
+
+【当前处境与线索】
+- 正在进行：...
+- 未解之谜：...
+- NPC关系：...
+```
+
+摘要长度控制在 1500-3000 字。务必用简洁但精确的语言，不要添加原文中没有的信息。
+
+## 待压缩的内容
+
+{history_text}
+
+请直接输出剧情档案摘要。"""
+
+
+def _estimate_tokens(text: str) -> int:
+    """粗略估算文本的 token 数。中文≈2 token/字，英文≈0.5 token/字符"""
+    chinese_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    other_count = len(text) - chinese_count
+    return int(chinese_count * 2 + other_count * 0.5)
+
+
+def _estimate_history_tokens(history: list[dict]) -> int:
+    """估算整个对话历史的总 token 数"""
+    return sum(_estimate_tokens(m.get("content", "")) for m in history)
+
+
+async def _compress_history(session: dict, player_id: str) -> bool:
+    """
+    检查并在需要时压缩对话历史。
+    将旧对话通过 AI 总结为故事摘要，保留最近的完整对话。
+    返回 True 表示执行了压缩。
+    """
+    history = session.get("internal_history", [])
+    total_tokens = _estimate_history_tokens(history)
+    max_tokens = settings.MAX_CONTEXT_TOKENS
+    threshold = int(max_tokens * COMPRESSION_THRESHOLD)
+
+    if total_tokens < threshold:
+        return False
+
+    logger.info(
+        f"[压缩] 玩家 {player_id} 上下文已达 {total_tokens}/{max_tokens} tokens "
+        f"({total_tokens * 100 // max_tokens}%)，触发历史压缩..."
+    )
+
+    # 分离 system prompt（第一条消息）
+    system_msg = None
+    if history and history[0].get("role") == "system":
+        system_msg = history[0]
+        non_system = history[1:]
+    else:
+        non_system = history[:]
+
+    if len(non_system) <= 4:
+        logger.warning("[压缩] 非系统消息太少，跳过压缩")
+        return False
+
+    # 分割：压缩旧的 60%，保留最近 40%
+    split_point = max(2, int(len(non_system) * (1 - RECENT_HISTORY_RATIO)))
+    old_messages = non_system[:split_point]
+    recent_messages = non_system[split_point:]
+
+    # 构建待总结的文本
+    old_text_parts = []
+    existing_summary = session.get("story_summary", "")
+    if existing_summary:
+        old_text_parts.append(f"【此前的故事摘要】\n{existing_summary}\n")
+        old_text_parts.append("【后续发生的剧情对话】")
+
+    for msg in old_messages:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        if role == "system":
+            old_text_parts.append(f"[系统]: {content[:500]}")  # system 消息截断
+        elif role == "user":
+            old_text_parts.append(f"[玩家行动]: {content}")
+        elif role == "assistant":
+            old_text_parts.append(f"[天道回应]: {content[:800]}")  # AI 回复较长，适当截断
+
+    old_text = "\n".join(old_text_parts)
+
+    # 调用 AI 进行摘要
+    try:
+        summary = await openai_client.get_ai_response(
+            prompt=COMPRESSION_PROMPT.format(history_text=old_text),
+            history=None,
+            force_json=False,
+            user_id=player_id,
+        )
+
+        if summary.startswith("错误："):
+            logger.error(f"[压缩] AI 摘要生成失败: {summary}")
+            return False
+
+        # 重建历史
+        new_history = []
+        if system_msg:
+            new_history.append(system_msg)
+
+        # 插入摘要作为 system 消息
+        new_history.append({
+            "role": "system",
+            "content": f"【故事摘要 · 此前发生的剧情回顾】\n\n{summary}\n\n"
+                       f"（以上为历史剧情的压缩摘要，请基于此摘要和后续完整对话继续叙事。）"
+        })
+
+        # 追加保留的近期对话
+        new_history.extend(recent_messages)
+
+        # 计算压缩效果
+        old_tokens = total_tokens
+        new_tokens = _estimate_history_tokens(new_history)
+
+        session["internal_history"] = new_history
+        session["story_summary"] = summary
+
+        logger.info(
+            f"[压缩] 完成！{old_tokens} → {new_tokens} tokens "
+            f"(节省 {old_tokens - new_tokens} tokens, {(old_tokens - new_tokens) * 100 // old_tokens}%)"
+        )
+
+        # 通知玩家（加入 display_history）
+        session["display_history"].append(
+            "【系统】\n\n📜 天道记忆已凝练 —— 久远的剧情已被浓缩为故事摘要，近期经历完整保留。"
+        )
+
+        return True
+
+    except Exception as e:
+        logger.error(f"[压缩] 历史压缩失败: {e}", exc_info=True)
+        return False
 
 # --- Image Generation State ---
 # 记录每个玩家的最后活动时间，用于判断是否触发图片生成
@@ -429,6 +615,11 @@ async def _process_player_action_async(user_info: dict, action: str):
         session["display_history"].append(f"> {action}")
 
         await state_manager.save_session(player_id, session)
+
+        # 上下文压缩检查：达到 80% 阈值时自动压缩历史
+        if await _compress_history(session, player_id):
+            await state_manager.save_session(player_id, session)
+
         # Get AI response
         ai_json_response_str = await openai_client.get_ai_response(
             prompt=prompt_for_ai, history=session["internal_history"], user_id=player_id
