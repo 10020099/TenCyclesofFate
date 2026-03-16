@@ -189,7 +189,7 @@ async def get_or_create_daily_session(current_user: dict) -> dict:
     logger.info(f"Starting new daily session for {player_id}.")
     new_session = {
         "player_id": player_id,
-        "session_date": today_str,
+        "session_date": date.today().isoformat(),
         "opportunities_remaining": INITIAL_OPPORTUNITIES,
         "daily_success_achieved": False,
         "is_in_trial": False,
