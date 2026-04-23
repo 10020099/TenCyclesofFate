@@ -41,7 +41,7 @@
 
 ```bash
 # 拉取最新镜像
-docker pull ghcr.io/<你的用户名>/tencyclesoffate:latest
+docker pull ghcr.io/10020099/tencyclesoffate:latest
 
 # 运行容器
 docker run -d \
@@ -49,7 +49,7 @@ docker run -d \
   -p 8000:8000 \
   -v ./backend/.env:/app/backend/.env \
   -v ./game_data:/app/game_data \
-  ghcr.io/<你的用户名>/tencyclesoffate:latest
+  ghcr.io/10020099/tencyclesoffate:latest
 ```
 
 #### 本地构建
@@ -81,7 +81,7 @@ docker run -d \
 #### 2. 获取代码
 
 ```bash
-git clone <你的仓库地址>
+git clone https://github.com/10020099/TenCyclesofFate.git
 cd TenCyclesofFate
 ```
 
@@ -156,15 +156,6 @@ chmod +x run.sh && ./run.sh
 ├── README.md               # 本文档
 └── run.sh                  # 启动脚本
 ```
-
-## 🔄 CI/CD 自动构建
-
-推送到 `main`/`master` 分支时，GitHub Actions 会自动：
-
-1. 计算版本号（从 `v1.0` 开始，每次构建 +0.1）
-2. 创建 Git Tag
-3. 构建 Docker 镜像并推送到 GitHub Container Registry (ghcr.io)
-4. 同时打版本号 tag 和 `latest` tag
 
 ## 📄 许可证
 
